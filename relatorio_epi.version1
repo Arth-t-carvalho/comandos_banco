@@ -1,0 +1,298 @@
+# Relatório Técnico — epiGuard
+
+---
+
+## 1. Visão Geral e Propósito
+
+### Para que serve
+
+O **epiGuard** é um sistema de gestão de Equipamentos de Proteção Individual (EPI) voltado para ambientes industriais e educacionais (SENAI). Seu propósito principal é **monitorar, registrar e gerenciar ocorrências de não conformidade no uso de EPIs** por funcionários, fornecendo aos supervisores e gerentes de segurança uma plataforma centralizada para:
+
+- Detectar infrações de uso de EPI em tempo real.
+- Registrar ocorrências com evidências fotográficas.
+- Aplicar ações disciplinares escalonadas (observação → advertência verbal → advertência escrita → suspensão).
+- Visualizar estatísticas e tendências de conformidade via dashboard analítico.
+- Gerenciar setores, funcionários e tipos de EPI.
+
+### Público-alvo / Contexto
+
+O sistema é projetado para uso interno em **unidades do SENAI** e **ambientes industriais** que exigem fiscalização rigorosa de EPIs. Os perfis de usuário incluem:
+
+| Perfil | Descrição |
+|---|---|
+| **Super Admin** | Acesso total ao sistema, gestão de usuários e configurações |
+| **Supervisor** | Monitoramento de setores específicos, registro de ocorrências |
+| **Gerente de Segurança** | Visão analítica, geração de relatórios, aplicação de ações disciplinares |
+
+---
+
+## 2. Ecossistema Tecnológico
+
+### Linguagem de Programação
+
+| Camada | Linguagem | Versão Inferida |
+|---|---|---|
+| Backend | **PHP** | 8.1+ (uso de `readonly`, named arguments, enums tipados, `strict_types`) |
+| Frontend | **JavaScript** (ES6+) | Vanilla JS com `async/await`, `fetch API`, template literals |
+| Markup | **HTML5** | Semântico com PHP embutido |
+| Estilo | **CSS3** | Vanilla CSS com variáveis customizadas, `backdrop-filter`, `@keyframes` |
+| Banco de Dados | **SQL** (MySQL/MariaDB) | utf8mb4, InnoDB |
+
+### Frameworks e Bibliotecas
+
+| Tecnologia | Tipo | Uso |
+|---|---|---|
+| **Nenhum framework PHP** | Backend | Arquitetura custom Clean Architecture com autoloader PSR-4 |
+| **Chart.js** | Frontend | Gráficos no dashboard (barras, rosca, linha) |
+| **Font Awesome 6.4** | Frontend | Ícones de interface |
+| **Lucide Icons** | Frontend | Ícones complementares na sidebar |
+| **Google Fonts (Inter + Outfit)** | Frontend | Tipografia premium |
+| **mysqli** | Backend | Driver nativo para conexão ao MySQL |
+
+### Ferramentas de Construção
+
+| Ferramenta | Propósito |
+|---|---|
+| **Composer** | Autoloader PSR-4 (arquivo `composer.json` presente, mas sem dependências externas) |
+| **XAMPP** | Ambiente de desenvolvimento (Apache + MySQL + PHP) |
+| **mod_rewrite** | Roteamento via `.htaccess` para URLs limpas |
+
+### Ambiente
+
+- **Tipo**: Aplicação Web Full-Stack (Backend + Frontend)
+- **Servidor**: Apache (XAMPP)
+- **Padrão**: Server-Side Rendering (SSR) com PHP, complementado por AJAX para interações dinâmicas
+
+---
+
+## 3. Entradas e Integrações
+
+### Dados de Entrada
+
+| Fonte | Formato | Descrição |
+|---|---|---|
+| Formulários HTML | POST/GET | Login, cadastro, registro de ocorrências, filtros |
+| Variáveis de ambiente | `.env` | Credenciais do banco (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`, `DB_PORT`) |
+| Arquivos de imagem | JPEG/PNG | Fotos de funcionários (`foto_referencia`), amostras faciais, evidências |
+| Sessão PHP | `$_SESSION` | Autenticação e estado do usuário logado |
+
+### APIs Internas (Endpoints REST)
+
+O sistema expõe **7 endpoints de API** internos para comunicação AJAX:
+
+| Endpoint | Método | Descrição |
+|---|---|---|
+| `/api/charts` | GET | Dados para gráficos do dashboard |
+| `/api/calendar` | GET | Ocorrências por data para calendário |
+| `/api/modal_details` | GET | Detalhes de ocorrência para modal |
+| `/api/check_notificacoes` | GET | Polling de novas infrações (a cada 5s) |
+| `/api/departments` | GET | Listagem de setores |
+| `/api/departments/create` | POST | Criação de setor |
+| `/api/departments/update` | POST | Atualização de setor |
+| `/api/departments/delete` | POST | Exclusão de setor |
+| `/api/departments/employees` | GET | Funcionários por setor |
+
+### APIs Externas
+
+Nenhuma API externa é consumida. O sistema opera inteiramente offline/local.
+
+### Banco de Dados
+
+| Aspecto | Detalhe |
+|---|---|
+| **SGBD** | MySQL 5.7+ / MariaDB 10.3+ |
+| **Schema** | `epi_guard` |
+| **Charset** | `utf8mb4_unicode_ci` |
+| **Engine** | InnoDB (suporte a transações e FK) |
+| **Driver** | `mysqli` (nativo PHP, sem ORM) |
+| **Conexão** | Singleton via `Connection::getInstance()` |
+
+#### Diagrama Entidade-Relacionamento
+
+```mermaid
+erDiagram
+    SETORES ||--o{ FUNCIONARIOS : "possui"
+    FUNCIONARIOS ||--o{ OCORRENCIAS : "gera"
+    OCORRENCIAS ||--o{ OCORRENCIA_EPIS : "envolve"
+    EPIS ||--o{ OCORRENCIA_EPIS : "referenciado"
+    OCORRENCIAS ||--o{ ACOES_OCORRENCIA : "recebe"
+    USUARIOS ||--o{ ACOES_OCORRENCIA : "aplica"
+    FUNCIONARIOS ||--o{ AMOSTRAS_FACIAIS : "cadastra"
+    OCORRENCIAS ||--o{ EVIDENCIAS : "documenta"
+    SETORES ||--o{ USUARIOS : "pertence"
+
+    SETORES {
+        int id PK
+        varchar nome
+        varchar sigla
+        enum status
+        text epis_json
+    }
+
+    FUNCIONARIOS {
+        int id PK
+        varchar nome
+        int setor_id FK
+        enum turno
+        varchar foto_referencia
+        enum status_epi
+    }
+
+    OCORRENCIAS {
+        int id PK
+        int funcionario_id FK
+        datetime data_hora
+        enum tipo
+        boolean oculto
+    }
+
+    EPIS {
+        int id PK
+        varchar nome
+        text descricao
+    }
+
+    USUARIOS {
+        int id PK
+        varchar nome
+        varchar usuario UK
+        varchar senha
+        enum cargo
+    }
+```
+
+---
+
+## 4. Arquitetura e Fluxo
+
+### Padrão Arquitetural: Clean Architecture
+
+O projeto segue rigorosamente a **Clean Architecture** (Robert C. Martin), com 4 camadas bem definidas:
+
+```
+src/
+├── Domain/              ← Regras de negócio (camada mais interna)
+│   ├── Entity/          ← 8 entidades ricas (Occurrence, Employee, User, etc.)
+│   ├── ValueObject/     ← 6 VOs com validação (OccurrenceType, UserRole, CPF, Email, etc.)
+│   ├── Repository/      ← 6 interfaces de repositório (contratos)
+│   └── Exception/       ← Exceções de domínio
+│
+├── Application/         ← Casos de uso e orquestração
+│   ├── DTO/             ← Data Transfer Objects
+│   ├── Service/         ← Serviços de aplicação
+│   └── Validator/       ← Validadores
+│
+├── Infrastructure/      ← Implementações concretas (camada mais externa)
+│   ├── Database/        ← Singleton de conexão mysqli
+│   ├── Persistence/     ← 6 repositórios MySQL (implementam as interfaces)
+│   ├── External/        ← Integrações externas
+│   ├── Security/        ← Criptografia e autenticação
+│   └── Storage/         ← Armazenamento de arquivos
+│
+└── Presentation/        ← Interface com o usuário
+    ├── Controller/      ← 9 controllers + 7 API controllers
+    ├── Middleware/       ← Middleware de autenticação
+    └── View/            ← 9 módulos de views (PHP + HTML)
+        ├── auth/        ← Login, Registro, Recuperação
+        ├── dashboard/   ← Painel analítico
+        ├── infractions/ ← Gestão de infrações
+        ├── management/  ← Setores, Funcionários, Instrutores
+        ├── monitoring/  ← Monitoramento em tempo real
+        ├── occurrences/ ← Registro de ocorrências
+        └── layout/      ← Template base (main, sidebar, header)
+```
+
+### Fluxo de Dados Principal
+
+```mermaid
+sequenceDiagram
+    participant Browser as 🌐 Navegador
+    participant Apache as 🔀 Apache (.htaccess)
+    participant Router as 📋 index.php (Router)
+    participant Controller as ⚙️ Controller
+    participant Repository as 🗄️ Repository (MySQL)
+    participant View as 🖼️ View (PHP/HTML)
+
+    Browser->>Apache: GET /dashboard
+    Apache->>Router: Rewrite para index.php
+    Router->>Router: PSR-4 Autoload + .env
+    Router->>Controller: DashboardController::index()
+    Controller->>Repository: findAll(), countDaily()
+    Repository->>Repository: SQL → mysqli → Entity
+    Repository-->>Controller: Occurrence[], int
+    Controller->>View: require dashboard/index.php
+    View-->>Browser: HTML + CSS + JS
+
+    Note over Browser: Polling a cada 5s
+    Browser->>Controller: AJAX GET /api/check_notificacoes
+    Controller->>Repository: findNewInfractions()
+    Repository-->>Controller: array associativo
+    Controller-->>Browser: JSON Response
+    Browser->>Browser: Exibe Toast + Atualiza Badge
+```
+
+### Módulos Principais
+
+| Módulo | Responsabilidade |
+|---|---|
+| `MySQLOccurrenceRepository` | O repositório mais complexo (560+ linhas). Gerencia todas as consultas de ocorrências, estatísticas mensais, distribuição por EPI e detecção de novas infrações |
+| `AuthController` | Autenticação completa: login com bcrypt, registro, recuperação de senha e gerenciamento de sessão |
+| `notifications.js` | Motor de polling AJAX que monitora o banco a cada 5s e exibe toasts glassmorphism |
+| `dashboard.js` | Integração com Chart.js para renderização de gráficos de barras, rosca e linha |
+| `Connection.php` | Singleton thread-safe para conexão mysqli com fallback de variáveis de ambiente |
+
+---
+
+## 5. Funcionalidades Principais
+
+### 5.1 Dashboard Analítico
+Painel central com KPIs (infrações diárias, semanais, mensais), gráficos de tendência (Chart.js) e calendário interativo de ocorrências. Suporta filtros por setor.
+
+### 5.2 Sistema de Notificações em Tempo Real
+Polling AJAX a cada 5 segundos que detecta novas infrações no banco. Exibe toasts premium com glassmorphism no canto superior direito. Inclui badge acumulativo no ícone do sino com persistência via `localStorage`.
+
+### 5.3 Gestão de Infrações com Visualização Dupla
+Lista de infrações com dois modos: **Tabela** (dados tabulares clássicos) e **Cards** (fotos dos funcionários em grid responsivo). Ambas oferecem ações de visualizar, salvar, assinar ocorrência e resolver.
+
+### 5.4 Gestão de Setores e Funcionários (CRUD Completo)
+Interface para criar, editar e excluir setores. Cada setor possui lista de EPIs obrigatórios (em JSON) e funcionários vinculados. Suporta pesquisa e seleção em massa.
+
+### 5.5 Autenticação e Controle de Acesso
+Login com hash bcrypt, registro com mapeamento de cargos (Super Admin, Supervisor, Gerente de Segurança), gerenciamento de sessão PHP e recuperação de senha (mockup).
+
+---
+
+## 6. Design e Interface
+
+### Identidade Visual
+| Aspecto | Detalhe |
+|---|---|
+| **Cor primária** | `#E30613` (Vermelho SENAI) |
+| **Tipografia principal** | Inter (UI) + Outfit (Títulos) |
+| **Estilo** | Glassmorphism + Micro-animações |
+| **Animações** | Transições `cubic-bezier`, toasts slide-in/out, hover effects premium |
+| **Responsividade** | Grid CSS auto-fill com breakpoints adaptativos |
+
+### Componentes Premium
+- **Sidebar estática**: Permanece fixa durante navegação AJAX
+- **Navegação SPA**: Transições de slide (0.6s) entre páginas sem reload
+- **Toast notifications**: Cards glassmorphism com barra de progresso e auto-dismiss (3s)
+- **Badge pulsante**: Animação `pulse-red` no sino de notificações
+- **Cards de infração**: Grid responsivo com zoom suave na foto ao hover
+
+---
+
+## 7. Segurança
+
+| Mecanismo | Implementação |
+|---|---|
+| **Senhas** | Hash bcrypt via `password_hash()` / `password_verify()` |
+| **Sessão** | `$_SESSION` com `session_start()` |
+| **SQL Injection** | Prepared statements (`bind_param`) em todos os repositórios |
+| **XSS** | `htmlspecialchars()` nos outputs das views |
+| **CSRF** | ⚠️ Não implementado (pendente) |
+| **Middleware de Auth** | ⚠️ Estrutura criada, mas lógica não implementada |
+
+---
+
+*Relatório gerado em 26/03/2026 com base na análise estática do código-fonte.*

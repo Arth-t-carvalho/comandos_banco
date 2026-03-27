@@ -24,8 +24,14 @@ switch ($action) {
     case 'bulk_create':
         handleBulkCreate($table, $input);
         break;
+    case 'bulk_create_ocorrencias':
+        handleBulkCreateOcorrencias($input);
+        break;
     case 'delete':
         handleDelete($table, $_GET['id'] ?? null);
+        break;
+    case 'bulk_delete_recent':
+        handleBulkDeleteRecent($table, $input);
         break;
     case 'list':
         handleList($table);
@@ -71,6 +77,39 @@ function handleBulkCreate($table, $data) {
         response('success', count($data) . ' records created successfully');
     } catch (Exception $e) {
         $pdo->rollBack();
+        response('error', $e->getMessage());
+    }
+}
+
+function handleBulkCreateOcorrencias($data) {
+    global $pdo;
+    if (!is_array($data)) response('error', 'Data must be an array of objects');
+
+    try {
+        $pdo->beginTransaction();
+        foreach ($data as $row) {
+            $epi_ids = $row['epi_ids'] ?? [];
+            unset($row['epi_ids']);
+
+            $keys = array_keys($row);
+            $fields = implode(',', $keys);
+            $placeholders = implode(',', array_map(fn($k) => ":$k", $keys));
+            
+            $stmt = $pdo->prepare("INSERT INTO ocorrencias ($fields) VALUES ($placeholders)");
+            $stmt->execute($row);
+            $occId = $pdo->lastInsertId();
+
+            if (!empty($epi_ids)) {
+                foreach ($epi_ids as $epiId) {
+                    $epiStmt = $pdo->prepare("INSERT INTO ocorrencia_epis (ocorrencia_id, epi_id) VALUES (:occ, :epi)");
+                    $epiStmt->execute(['occ' => $occId, 'epi' => $epiId]);
+                }
+            }
+        }
+        $pdo->commit();
+        response('success', count($data) . ' ocorrências processadas com sucesso');
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         response('error', $e->getMessage());
     }
 }
@@ -136,11 +175,52 @@ function handleDelete($table, $id) {
         $stmt = $pdo->query("SELECT MAX(id) FROM $table");
         $max = $stmt->fetchColumn() ?: 0;
         $next = $max + 1;
-        $pdo->exec("ALTER TABLE $table AUTO_INCREMENT = $next");
 
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
         $pdo->commit();
+
+        $pdo->exec("ALTER TABLE $table AUTO_INCREMENT = $next");
+        
         response('success', 'Registro removido e IDs reorganizados com sucesso');
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+        response('error', $e->getMessage());
+    }
+}
+
+function handleBulkDeleteRecent($table, $data) {
+    global $pdo;
+    $count = (int)($data['count'] ?? 0);
+    if ($count <= 0) response('error', 'Quantidade inválida');
+
+    try {
+        $pdo->beginTransaction();
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+
+        $stmt = $pdo->prepare("SELECT id FROM $table ORDER BY id DESC LIMIT :limit");
+        $stmt->bindValue(':limit', $count, PDO::PARAM_INT);
+        $stmt->execute();
+        $idsToDelete = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($idsToDelete)) {
+            $pdo->rollBack();
+            $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+            response('success', 'Nenhum registro para remover.');
+        }
+
+        $idList = implode(',', array_map('intval', $idsToDelete));
+        $pdo->exec("DELETE FROM $table WHERE id IN ($idList)");
+
+        $stmt = $pdo->query("SELECT MAX(id) FROM $table");
+        $max = $stmt->fetchColumn() ?: 0;
+        $next = $max + 1;
+
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+        $pdo->commit();
+        
+        $pdo->exec("ALTER TABLE $table AUTO_INCREMENT = $next");
+        response('success', count($idsToDelete) . ' registros recentes removidos com sucesso.');
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
